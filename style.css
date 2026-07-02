@@ -28,6 +28,7 @@ body {
     background: #141426;
     border: 1px solid #30324b;
     box-shadow: 0 18px 70px rgba(0, 0, 0, 0.38);
+    -webkit-user-select: none;
     user-select: none;
 }
 
@@ -39,7 +40,7 @@ body {
     padding: 0 8px 0 12px;
     background: #24243c;
     color: #d7defa;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     cursor: move;
 }
@@ -50,7 +51,7 @@ body {
     border: 0;
     background: #553042;
     color: #ffdbe6;
-    font-size: 16px;
+    font-size: 18px;
     line-height: 20px;
     cursor: pointer;
 }

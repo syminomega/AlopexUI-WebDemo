@@ -10,6 +10,7 @@ export function createBrowserApplicationImports(canvasId = "surface", getEventDi
         createWindow: async (optionsJson) =>
             JSON.stringify(defaultHost.createWindow(parseOptions(optionsJson))),
         start: () => defaultHost.start(),
+        wakeUp: () => defaultHost.wakeUp(),
         requestRedraw: (windowId) => defaultHost.requestRedraw(windowId),
         setTitle: (windowId, title) => defaultHost.setTitle(windowId, title),
         setCursor: (windowId, cursor) => defaultHost.setCursor(windowId, cursor),
@@ -23,6 +24,8 @@ export function createBrowserApplicationImports(canvasId = "surface", getEventDi
         setDecorations: (windowId, decorated) => defaultHost.setDecorations(windowId, decorated),
         setWindowLevel: (windowId, level) => defaultHost.setWindowLevel(windowId, level),
         setEnabledButtons: (windowId, buttons) => defaultHost.setEnabledButtons(windowId, buttons),
+        setMenuBar: (windowId, menuJson) => defaultHost.setMenuBar(windowId, menuJson),
+        showContextMenu: (windowId, menuJson, x, y) => defaultHost.showContextMenu(windowId, menuJson, x, y),
         setMinSurfaceSize: (windowId, hasSize, width, height) => defaultHost.setMinSurfaceSize(windowId, hasSize, width, height),
         setMaxSurfaceSize: (windowId, hasSize, width, height) => defaultHost.setMaxSurfaceSize(windowId, hasSize, width, height),
         enableTextInput: (windowId, caretX, caretY, caretWidth, caretHeight, surroundingText, cursorByteIndex, anchorByteIndex) =>
@@ -32,6 +35,7 @@ export function createBrowserApplicationImports(canvasId = "surface", getEventDi
         disableTextInput: (windowId) => defaultHost.disableTextInput(windowId),
         readClipboardText: () => readClipboardText(),
         writeClipboardText: (text) => writeClipboardText(text),
+        getPreferredLanguage: () => getPreferredLanguage(),
         destroyWindow: (windowId) => defaultHost.destroyWindow(windowId),
         stop: () => defaultHost.stop(),
         dispose: () => defaultHost.dispose(),
@@ -50,6 +54,8 @@ export async function initializeBrowserApplicationImports(canvas, moduleName = "
         return false;
     }
 
+    // Prefer source-generated JS imports/exports when they are available. Blazor Server-like
+    // paths fall back to DotNetObjectReference below, which still uses JSON for events.
     runtime.setModuleImports(moduleName, {
         alopexApplication: createBrowserApplicationImports(canvas, () => applicationExports),
     });
@@ -66,6 +72,7 @@ export function createBlazorEventLoop(canvas) {
         createWindow: (options) => host.createWindow(parseOptions(options)),
         createWindowJson: (options) => JSON.stringify(host.createWindow(parseOptions(options))),
         start: (eventTarget) => host.start(eventTarget),
+        wakeUp: () => host.wakeUp(),
         requestRedraw: (windowId) => host.requestRedraw(windowId),
         setTitle: (windowId, title) => host.setTitle(windowId, title),
         setCursor: (windowId, cursor) => host.setCursor(windowId, cursor),
@@ -79,6 +86,8 @@ export function createBlazorEventLoop(canvas) {
         setDecorations: (windowId, decorated) => host.setDecorations(windowId, decorated),
         setWindowLevel: (windowId, level) => host.setWindowLevel(windowId, level),
         setEnabledButtons: (windowId, buttons) => host.setEnabledButtons(windowId, buttons),
+        setMenuBar: (windowId, menuJson) => host.setMenuBar(windowId, menuJson),
+        showContextMenu: (windowId, menuJson, x, y) => host.showContextMenu(windowId, menuJson, x, y),
         setMinSurfaceSize: (windowId, hasSize, width, height) => host.setMinSurfaceSize(windowId, hasSize, width, height),
         setMaxSurfaceSize: (windowId, hasSize, width, height) => host.setMaxSurfaceSize(windowId, hasSize, width, height),
         enableTextInput: (windowId, caretX, caretY, caretWidth, caretHeight, surroundingText, cursorByteIndex, anchorByteIndex) =>
@@ -86,6 +95,7 @@ export function createBlazorEventLoop(canvas) {
         updateTextInput: (windowId, caretX, caretY, caretWidth, caretHeight, surroundingText, cursorByteIndex, anchorByteIndex) =>
             host.updateTextInput(windowId, caretX, caretY, caretWidth, caretHeight, surroundingText, cursorByteIndex, anchorByteIndex),
         disableTextInput: (windowId) => host.disableTextInput(windowId),
+        getPreferredLanguage: () => getPreferredLanguage(),
         destroyWindow: (windowId) => host.destroyWindow(windowId),
         stop: () => host.stop(),
         dispose: () => host.dispose(),
@@ -107,6 +117,10 @@ class AlopexApplicationHost {
         this.disposers = [];
         this.pendingRedraws = new Set();
         this.rafScheduled = false;
+        this.wakeScheduled = false;
+        this.pendingPointerMoves = new Map();
+        this.pointerMoveFlushScheduled = false;
+        this.pointerMoveFlushInProgress = false;
         this.activePointerCapture = new Map();
         this.zOrderCounter = 0;
         this.ensureContainer();
@@ -136,6 +150,7 @@ class AlopexApplicationHost {
         const maxContentCssHeight = rawMaxHeight === null ? null : Math.max(minContentCssHeight, rawMaxHeight);
         const decorated = Boolean(options.decorations ?? options.Decorations ?? true);
         const enabledButtons = Number(options.enabledButtons ?? options.EnabledButtons ?? 7);
+        const ownerId = normalizeOwnerWindowId(options.ownerWindowId ?? options.OwnerWindowId);
 
         const frame = document.createElement("div");
         frame.className = "alopex-web-window";
@@ -155,6 +170,11 @@ class AlopexApplicationHost {
         titleText.className = "alopex-web-window-title";
         titleText.textContent = title;
         titlebar.appendChild(titleText);
+
+        const menubar = document.createElement("div");
+        menubar.className = "alopex-web-window-menubar";
+        menubar.style.display = "none";
+        titlebar.appendChild(menubar);
 
         const buttons = document.createElement("div");
         buttons.className = "alopex-web-window-buttons";
@@ -220,6 +240,7 @@ class AlopexApplicationHost {
             frame,
             titlebar,
             titleText,
+            menubar,
             minimizeButton,
             maximizeButton,
             closeButton,
@@ -243,7 +264,12 @@ class AlopexApplicationHost {
             visible: Boolean(options.visible ?? options.Visible ?? true),
             decorated,
             windowLevel: String(options.windowLevel ?? options.WindowLevel ?? "Normal"),
+            ownerId,
+            hiddenByOwner: false,
             enabledButtons,
+            menuBar: null,
+            activeMenuPopup: null,
+            titlebarExpanded: false,
             minContentCssWidth,
             minContentCssHeight,
             maxContentCssWidth,
@@ -254,6 +280,8 @@ class AlopexApplicationHost {
             textInputSurroundingText: "",
             textInputCursorByteIndex: 0,
             textInputAnchorByteIndex: 0,
+            activeTouches: new Map(),
+            lastPinchDistance: 0,
         };
         this.windows.set(id.toString(), entry);
         this.resizeEntry(entry, contentCssWidth, contentCssHeight, false);
@@ -270,6 +298,7 @@ class AlopexApplicationHost {
         }
         this.bindWindowEvents(entry);
         this.bindWindowChrome(entry);
+        this.observeSurface(entry);
         return {
             windowId: id.toString(),
             canvasId: canvas.id,
@@ -279,12 +308,15 @@ class AlopexApplicationHost {
             title,
             x: entry.x,
             y: entry.y,
+            surfaceX: entry.x,
+            surfaceY: entry.y + decoratedChromeHeight(entry),
             resizable: entry.resizable,
             maximized: entry.maximized,
             minimized: entry.minimized,
             visible: entry.visible,
             decorated: entry.decorated,
             windowLevel: entry.windowLevel,
+            ownerWindowId: entry.ownerId ? Number(entry.ownerId) : null,
             enabledButtons: entry.enabledButtons,
         };
     }
@@ -326,11 +358,18 @@ class AlopexApplicationHost {
         const resize = () => this.handleResize();
         window.addEventListener("resize", resize);
         this.disposers.push(() => window.removeEventListener("resize", resize));
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener("resize", resize);
+            this.disposers.push(() => window.visualViewport.removeEventListener("resize", resize));
+        }
+        this.watchDevicePixelRatio(resize);
     }
 
     stop() {
         this.started = false;
         this.pendingRedraws.clear();
+        this.wakeScheduled = false;
+        this.pendingPointerMoves.clear();
     }
 
     dispose() {
@@ -344,11 +383,23 @@ class AlopexApplicationHost {
     destroyWindow(windowId) {
         const key = windowId.toString();
         const entry = this.windows.get(key);
-        if (!entry) return;
+        if (!entry) {
+            const removed = removeWindowFramesById(key);
+            this.pendingRedraws.delete(key);
+            this.pendingPointerMoves.delete(key);
+            this.activePointerCapture.delete(key);
+            return removed > 0;
+        }
 
+        for (const child of this.getOwnedWindows(entry)) {
+            this.destroyWindow(child.id);
+        }
+
+        this.closeMenuPopup(entry);
         this.windows.delete(key);
-        entry.frame.remove();
+        const removed = removeWindowFramesById(key);
         this.dispatchWindowEvent(entry, { kind: "destroyed" });
+        return removed > 0;
     }
 
     requestRedraw(windowId) {
@@ -363,15 +414,27 @@ class AlopexApplicationHost {
             this.rafScheduled = false;
             if (!this.started) return;
 
-            await this.dispatchAboutToWait();
             const pending = [...this.pendingRedraws];
             this.pendingRedraws.clear();
+            await this.dispatchAboutToWait();
             for (const id of pending) {
                 const entry = this.windows.get(id);
                 if (entry) {
                     await this.dispatchWindowEvent(entry, { kind: "redraw-requested" });
                 }
             }
+        });
+    }
+
+    wakeUp() {
+        if (!this.started || this.wakeScheduled) return;
+
+        this.wakeScheduled = true;
+        queueMicrotask(async () => {
+            this.wakeScheduled = false;
+            if (!this.started) return;
+
+            await this.dispatchProxyWakeUp();
         });
     }
 
@@ -453,6 +516,7 @@ class AlopexApplicationHost {
                 width: entry.contentCssWidth,
                 height: entry.contentCssHeight,
             };
+            this.setTitlebarExpanded(entry, false, false);
             entry.maximized = true;
             entry.minimized = false;
             entry.frame.classList.add("alopex-web-window-maximized");
@@ -461,6 +525,7 @@ class AlopexApplicationHost {
         } else {
             entry.maximized = false;
             entry.frame.classList.remove("alopex-web-window-maximized");
+            this.setTitlebarExpanded(entry, false, false);
             const rect = entry.restoreRect ?? { x: 48, y: 42, width: entry.contentCssWidth, height: entry.contentCssHeight };
             entry.x = rect.x;
             entry.y = clampWindowY(rect.y);
@@ -481,12 +546,12 @@ class AlopexApplicationHost {
         entry.minimizeButton.disabled = true;
         entry.minimizeButton.style.display = "none";
 
-        if (entry.minimized || entry.content.style.display === "none") {
-            entry.minimized = false;
-            entry.content.style.display = "";
-            entry.resizeHandle.style.display = entry.resizable ? "" : "none";
-            entry.frame.style.gridTemplateRows = entry.decorated ? `${decoratedTitleBarHeight(entry)}px 1fr` : "1fr";
-            entry.frame.style.height = `${entry.contentCssHeight + decoratedTitleBarHeight(entry)}px`;
+        entry.minimized = Boolean(minimized);
+        entry.content.style.display = entry.minimized ? "none" : "";
+        entry.resizeHandle.style.display = entry.minimized || !entry.resizable ? "none" : "";
+        applyWindowLayout(entry);
+        this.setOwnedWindowsHidden(entry, entry.minimized || !entry.visible);
+        if (!entry.minimized) {
             this.requestRedraw(entry.id);
         }
 
@@ -510,6 +575,7 @@ class AlopexApplicationHost {
         if (!entry) return;
         entry.visible = Boolean(visible);
         entry.frame.style.display = entry.visible ? "grid" : "none";
+        this.setOwnedWindowsHidden(entry, !entry.visible || entry.minimized);
         if (entry.visible) {
             this.requestRedraw(entry.id);
         }
@@ -520,9 +586,11 @@ class AlopexApplicationHost {
         const entry = this.windows.get(windowId.toString());
         if (!entry) return;
         entry.decorated = Boolean(decorated);
+        if (!entry.decorated) {
+            this.setTitlebarExpanded(entry, false, false);
+        }
         entry.titlebar.style.display = entry.decorated ? "" : "none";
-        entry.frame.style.gridTemplateRows = entry.decorated ? `${decoratedTitleBarHeight(entry)}px 1fr` : "1fr";
-        entry.frame.style.height = `${entry.contentCssHeight + decoratedTitleBarHeight(entry)}px`;
+        applyWindowLayout(entry);
         this.requestRedraw(entry.id);
         this.dispatchStateChanged(entry);
     }
@@ -542,6 +610,11 @@ class AlopexApplicationHost {
         if (!entry || !entry.visible) return;
         entry.zOrder = ++this.zOrderCounter;
         this.applyWindowZIndex(entry);
+        for (const child of this.getOwnedWindows(entry)) {
+            if (!child.visible || child.hiddenByOwner) continue;
+            child.zOrder = ++this.zOrderCounter;
+            this.applyWindowZIndex(child);
+        }
     }
 
     applyWindowZIndex(entry) {
@@ -554,12 +627,199 @@ class AlopexApplicationHost {
         entry.frame.style.zIndex = String(base + (entry.zOrder ?? 0));
     }
 
+    getOwnedWindows(owner) {
+        const ownerId = owner.id.toString();
+        return [...this.windows.values()].filter(entry => entry.ownerId === ownerId);
+    }
+
+    setOwnedWindowsHidden(owner, hidden) {
+        for (const child of this.getOwnedWindows(owner)) {
+            child.hiddenByOwner = Boolean(hidden);
+            child.frame.style.display = hidden || !child.visible ? "none" : "grid";
+            if (!hidden && child.visible) {
+                this.requestRedraw(child.id);
+            }
+            this.setOwnedWindowsHidden(child, hidden || child.minimized || !child.visible);
+        }
+    }
+
     setEnabledButtons(windowId, buttons) {
         const entry = this.windows.get(windowId.toString());
         if (!entry) return;
         entry.enabledButtons = Number(buttons) & 7;
         this.applyEnabledButtons(entry);
         this.dispatchStateChanged(entry);
+    }
+
+    setMenuBar(windowId, menuJson) {
+        const entry = this.windows.get(windowId.toString());
+        if (!entry) return;
+        entry.menuBar = parseMenu(menuJson);
+        this.renderMenuBar(entry);
+        entry.frame.classList.toggle("alopex-web-window-has-menu", hasMenuBar(entry));
+        applyWindowLayout(entry);
+        this.requestRedraw(entry.id);
+    }
+
+    showContextMenu(windowId, menuJson, x, y) {
+        const entry = this.windows.get(windowId.toString());
+        if (!entry) return;
+        const menu = parseMenu(menuJson);
+        this.closeMenuPopup(entry);
+        const point = surfaceToWindowCssPoint(entry, x, y);
+        this.openMenuPopup(entry, menu.items, point.x, point.y, true);
+    }
+
+    renderMenuBar(entry) {
+        entry.menubar.replaceChildren();
+        this.closeMenuPopup(entry);
+        const items = entry.menuBar?.items ?? [];
+        for (const item of items) {
+            if (item.kind === "separator") continue;
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "alopex-web-menu-root";
+            button.textContent = item.text ?? "";
+            button.disabled = item.enabled === false;
+            button.addEventListener("pointerdown", event => {
+                event.preventDefault();
+                event.stopPropagation();
+            });
+            button.addEventListener("click", event => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (button.disabled) return;
+                if (item.kind === "command") {
+                    this.dispatchMenuCommand(entry, item.id);
+                    return;
+                }
+
+                const rect = button.getBoundingClientRect();
+                const frameRect = entry.frame.getBoundingClientRect();
+                this.openMenuPopup(entry, item.items ?? [], rect.left - frameRect.left, rect.bottom - frameRect.top, false);
+            });
+            entry.menubar.appendChild(button);
+        }
+    }
+
+    openMenuPopup(entry, items, x, y, contextMenu) {
+        this.closeMenuPopup(entry);
+        if (!Array.isArray(items) || items.length === 0) return;
+
+        const popup = document.createElement("div");
+        popup.className = "alopex-web-menu-popup";
+        if (contextMenu) popup.classList.add("alopex-web-context-menu");
+        popup.style.left = `${Math.max(0, Math.round(Number(x) || 0))}px`;
+        popup.style.top = `${Math.max(0, Math.round(Number(y) || 0))}px`;
+
+        for (const item of items) {
+            popup.appendChild(this.createMenuPopupItem(entry, item));
+        }
+
+        entry.frame.appendChild(popup);
+        entry.activeMenuPopup = popup;
+        requestAnimationFrame(() => clampPopupToFrame(entry, popup));
+
+        const close = event => {
+            if (popup.contains(event.target)) return;
+            this.closeMenuPopup(entry);
+            document.removeEventListener("pointerdown", close, true);
+            document.removeEventListener("keydown", keyClose, true);
+        };
+        const keyClose = event => {
+            if (event.key !== "Escape") return;
+            this.closeMenuPopup(entry);
+            document.removeEventListener("pointerdown", close, true);
+            document.removeEventListener("keydown", keyClose, true);
+        };
+        setTimeout(() => {
+            document.addEventListener("pointerdown", close, true);
+            document.addEventListener("keydown", keyClose, true);
+        }, 0);
+    }
+
+    createMenuPopupItem(entry, item) {
+        if (item.kind === "separator") {
+            const separator = document.createElement("div");
+            separator.className = "alopex-web-menu-separator";
+            return separator;
+        }
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "alopex-web-menu-item";
+        button.disabled = item.enabled === false;
+
+        const label = document.createElement("span");
+        label.className = "alopex-web-menu-label";
+        label.textContent = `${item.checked ? "✓ " : ""}${item.text ?? ""}`;
+        button.appendChild(label);
+
+        if (item.shortcutText) {
+            const shortcut = document.createElement("span");
+            shortcut.className = "alopex-web-menu-shortcut";
+            shortcut.textContent = item.shortcutText;
+            button.appendChild(shortcut);
+        }
+
+        if (item.kind === "submenu") {
+            const arrow = document.createElement("span");
+            arrow.className = "alopex-web-menu-arrow";
+            arrow.textContent = ">";
+            button.appendChild(arrow);
+        }
+
+        button.addEventListener("pointerdown", event => {
+            event.preventDefault();
+            event.stopPropagation();
+        });
+        button.addEventListener("click", event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (button.disabled) return;
+            if (item.kind === "submenu") {
+                const rect = button.getBoundingClientRect();
+                const frameRect = entry.frame.getBoundingClientRect();
+                this.openMenuPopup(entry, item.items ?? [], rect.right - frameRect.left - 4, rect.top - frameRect.top, false);
+                return;
+            }
+
+            this.dispatchMenuCommand(entry, item.id);
+            this.closeMenuPopup(entry);
+        });
+
+        return button;
+    }
+
+    closeMenuPopup(entry) {
+        if (!entry?.activeMenuPopup) return;
+        entry.activeMenuPopup.remove();
+        entry.activeMenuPopup = null;
+    }
+
+    setTitlebarExpanded(entry, expanded) {
+        const shouldExpand = Boolean(expanded && entry.maximized && entry.decorated);
+        if (entry.titlebarExpanded === shouldExpand) return;
+
+        entry.titlebarExpanded = shouldExpand;
+        entry.frame.classList.toggle("alopex-web-window-titlebar-expanded", shouldExpand);
+    }
+
+    async dispatchMenuCommand(entry, commandId) {
+        if (!commandId) return;
+        const dispatcher = this.eventTarget ?? this.getEventDispatcher?.();
+        if (!dispatcher) return;
+
+        const payload = {
+            windowId: Number(entry.id),
+            commandId: String(commandId),
+        };
+
+        if (dispatcher.invokeMethodAsync) {
+            await dispatcher.invokeMethodAsync("DispatchMenuCommandJsonAsync", JSON.stringify(payload));
+        } else if (dispatcher.DispatchMenuCommandAsync) {
+            await dispatcher.DispatchMenuCommandAsync(JSON.stringify(payload));
+        }
     }
 
     setMinSurfaceSize(windowId, hasSize, width, height) {
@@ -612,11 +872,13 @@ class AlopexApplicationHost {
         entry.textInputCursorByteIndex = Number(cursorByteIndex) || 0;
         entry.textInputAnchorByteIndex = Number(anchorByteIndex) || 0;
         const input = entry.textInput;
+        const point = surfaceToContentCssPoint(entry, caretX, caretY);
+        const size = surfaceToWindowCssSize(entry, caretWidth, caretHeight);
         input.style.display = "block";
-        input.style.left = `${Math.max(0, Number(caretX) || 0)}px`;
-        input.style.top = `${Math.max(0, Number(caretY) || 0)}px`;
-        input.style.width = `${Math.max(1, Number(caretWidth) || 1)}px`;
-        input.style.height = `${Math.max(16, Number(caretHeight) || 16)}px`;
+        input.style.left = `${Math.max(0, point.x)}px`;
+        input.style.top = `${Math.max(0, point.y)}px`;
+        input.style.width = `${Math.max(1, size.width)}px`;
+        input.style.height = `${Math.max(16, size.height)}px`;
     }
 
     bindWindowEvents(entry) {
@@ -629,21 +891,49 @@ class AlopexApplicationHost {
 
         on(canvas, "pointerenter", event => this.dispatchPointer(entry, event, "pointer-entered"));
         on(canvas, "pointerleave", event => this.dispatchPointer(entry, event, "pointer-left"));
-        on(canvas, "pointermove", event => this.dispatchPointer(entry, event, "pointer-moved"));
+        on(canvas, "pointermove", event => this.queuePointerMove(entry, event));
         on(canvas, "pointerdown", event => {
             canvas.focus();
+            // Browser-level capture keeps drag events flowing after the pointer leaves the
+            // canvas; AlopexUI still decides which element owns the captured drag.
+            trySetPointerCapture(canvas, event.pointerId);
+            this.updateTouchPinch(entry, event, "started");
             this.dispatchPointer(entry, event, "pointer-button", "pressed");
         });
-        on(canvas, "pointerup", event => this.dispatchPointer(entry, event, "pointer-button", "released"));
+        on(canvas, "pointerup", event => {
+            this.dropPendingPointerMove(entry, event.pointerId);
+            tryReleasePointerCapture(canvas, event.pointerId);
+            this.finishTouchPinch(entry, event);
+            this.dispatchPointer(entry, event, "pointer-button", "released");
+        });
+        on(canvas, "pointercancel", event => {
+            this.dropPendingPointerMove(entry, event.pointerId);
+            tryReleasePointerCapture(canvas, event.pointerId);
+            this.finishTouchPinch(entry, event);
+        });
+        on(canvas, "contextmenu", event => event.preventDefault());
         on(canvas, "wheel", event => {
             event.preventDefault();
             const point = canvasPoint(entry, event);
+            if (event.ctrlKey) {
+                this.dispatchWindowEvent(entry, {
+                    kind: "pinch-gesture",
+                    x: point.x,
+                    y: point.y,
+                    gestureDelta: -event.deltaY / 100,
+                    gesturePhase: 1,
+                    modifiers: modifiers(event),
+                });
+                return;
+            }
+
             this.dispatchWindowEvent(entry, {
                 kind: "mouse-wheel",
                 x: point.x,
                 y: point.y,
-                wheelX: event.deltaX,
-                wheelY: event.deltaY,
+                wheelX: -event.deltaX,
+                wheelY: -event.deltaY,
+                modifiers: modifiers(event),
             });
         }, { passive: false });
         on(canvas, "keydown", event => {
@@ -766,6 +1056,14 @@ class AlopexApplicationHost {
             titlebar.addEventListener("pointercancel", up);
         });
 
+        titlebar.addEventListener("mouseenter", () => {
+            this.setTitlebarExpanded(entry, true);
+        });
+
+        titlebar.addEventListener("mouseleave", () => {
+            this.setTitlebarExpanded(entry, false);
+        });
+
         resizeHandle.addEventListener("pointerdown", event => {
             if (!entry.resizable || entry.maximized || entry.minimized) return;
             event.preventDefault();
@@ -794,8 +1092,12 @@ class AlopexApplicationHost {
     }
 
     async dispatchPointer(entry, event, kind, state = "pressed") {
+        await this.dispatchWindowEvent(entry, this.createPointerPayload(entry, event, kind, state));
+    }
+
+    createPointerPayload(entry, event, kind, state = "pressed") {
         const point = canvasPoint(entry, event);
-        await this.dispatchWindowEvent(entry, {
+        return {
             kind,
             x: point.x,
             y: point.y,
@@ -805,7 +1107,137 @@ class AlopexApplicationHost {
             button: pointerButton(event.button),
             state,
             modifiers: modifiers(event),
+        };
+    }
+
+    updateTouchPinch(entry, event, phaseName) {
+        if (event.pointerType !== "touch") {
+            return;
+        }
+
+        const point = canvasPoint(entry, event);
+        entry.activeTouches.set(event.pointerId, point);
+        if (entry.activeTouches.size !== 2) {
+            entry.lastPinchDistance = 0;
+            return;
+        }
+
+        const touches = [...entry.activeTouches.values()];
+        const distance = Math.hypot(touches[0].x - touches[1].x, touches[0].y - touches[1].y);
+        const center = {
+            x: (touches[0].x + touches[1].x) / 2,
+            y: (touches[0].y + touches[1].y) / 2,
+        };
+
+        if (entry.lastPinchDistance <= 0 || phaseName === "started") {
+            entry.lastPinchDistance = distance;
+            this.dispatchWindowEvent(entry, {
+                kind: "pinch-gesture",
+                x: center.x,
+                y: center.y,
+                gestureDelta: 0,
+                gesturePhase: 0,
+                modifiers: modifiers(event),
+            });
+            return;
+        }
+
+        if (distance <= 0) {
+            return;
+        }
+
+        const delta = Math.log(distance / entry.lastPinchDistance);
+        entry.lastPinchDistance = distance;
+        if (Math.abs(delta) < 0.0001) {
+            return;
+        }
+
+        this.dispatchWindowEvent(entry, {
+            kind: "pinch-gesture",
+            x: center.x,
+            y: center.y,
+            gestureDelta: delta,
+            gesturePhase: 1,
+            modifiers: modifiers(event),
         });
+    }
+
+    finishTouchPinch(entry, event) {
+        if (event.pointerType !== "touch") {
+            return;
+        }
+
+        const wasPinching = entry.activeTouches.size >= 2;
+        const point = canvasPoint(entry, event);
+        entry.activeTouches.delete(event.pointerId);
+        if (wasPinching) {
+            this.dispatchWindowEvent(entry, {
+                kind: "pinch-gesture",
+                x: point.x,
+                y: point.y,
+                gestureDelta: 0,
+                gesturePhase: 2,
+                modifiers: modifiers(event),
+            });
+        }
+
+        if (entry.activeTouches.size < 2) {
+            entry.lastPinchDistance = 0;
+        }
+    }
+
+    queuePointerMove(entry, event) {
+        if (!this.started) return;
+        this.updateTouchPinch(entry, event, "moved");
+
+        // Coalesce pointer moves per pointer before crossing into .NET. This reduces bridge
+        // pressure during drags while preserving the most recent position for each pointer.
+        this.pendingPointerMoves.set(pointerMoveKey(entry, event.pointerId), {
+            entry,
+            payload: this.createPointerPayload(entry, event, "pointer-moved"),
+        });
+        this.schedulePointerMoveFlush();
+    }
+
+    dropPendingPointerMove(entry, pointerId) {
+        this.pendingPointerMoves.delete(pointerMoveKey(entry, pointerId));
+    }
+
+    schedulePointerMoveFlush() {
+        if (this.pointerMoveFlushScheduled) return;
+
+        this.pointerMoveFlushScheduled = true;
+        queueMicrotask(() => {
+            this.pointerMoveFlushScheduled = false;
+            void this.flushPendingPointerMoves();
+        });
+    }
+
+    flushPendingPointerMoves() {
+        if (this.pointerMoveFlushInProgress || !this.started || this.pendingPointerMoves.size === 0) {
+            return;
+        }
+
+        this.pointerMoveFlushInProgress = true;
+        const pending = [...this.pendingPointerMoves.values()];
+        this.pendingPointerMoves.clear();
+
+        const run = async () => {
+            try {
+                for (const { entry, payload } of pending) {
+                    if (this.windows.get(entry.id.toString()) === entry) {
+                        await this.dispatchWindowEvent(entry, payload);
+                    }
+                }
+            } finally {
+                this.pointerMoveFlushInProgress = false;
+                if (this.pendingPointerMoves.size > 0) {
+                    this.schedulePointerMoveFlush();
+                }
+            }
+        };
+
+        void run();
     }
 
     async dispatchKeyboard(entry, event, state, suppressText = false) {
@@ -822,45 +1254,32 @@ class AlopexApplicationHost {
     }
 
     handleResize() {
-        const dpr = window.devicePixelRatio || 1;
         for (const entry of this.windows.values()) {
             if (entry.maximized) {
                 this.applyMaximizedRect(entry);
                 continue;
             }
 
-            const width = Math.max(1, Math.round(entry.contentCssWidth * dpr));
-            const height = Math.max(1, Math.round(entry.contentCssHeight * dpr));
-            if (width === entry.width && height === entry.height && dpr === entry.dpr) continue;
-
-            entry.width = width;
-            entry.height = height;
-            entry.dpr = dpr;
-            entry.canvas.width = width;
-            entry.canvas.height = height;
-            this.dispatchResize(entry);
+            if (this.syncSurfaceSize(entry)) {
+                this.dispatchResize(entry);
+                this.requestRedraw(entry.id);
+            }
         }
     }
 
     resizeEntry(entry, contentCssWidth, contentCssHeight, dispatch) {
         entry.contentCssWidth = clampSize(contentCssWidth, entry.minContentCssWidth, entry.maxContentCssWidth);
         entry.contentCssHeight = clampSize(contentCssHeight, entry.minContentCssHeight, entry.maxContentCssHeight);
-        entry.frame.style.gridTemplateRows = entry.decorated ? `${decoratedTitleBarHeight(entry)}px 1fr` : "1fr";
         entry.frame.style.width = `${entry.contentCssWidth}px`;
-        entry.frame.style.height = `${entry.contentCssHeight + decoratedTitleBarHeight(entry)}px`;
-        const dpr = window.devicePixelRatio || 1;
-        entry.dpr = dpr;
-        entry.width = Math.max(1, Math.round(entry.contentCssWidth * dpr));
-        entry.height = Math.max(1, Math.round(entry.contentCssHeight * dpr));
-        entry.canvas.width = entry.width;
-        entry.canvas.height = entry.height;
+        applyWindowLayout(entry);
+        this.syncSurfaceSize(entry);
         if (dispatch) {
             this.dispatchResize(entry);
             this.requestRedraw(entry.id);
         }
     }
 
-    applyMaximizedRect(entry) {
+    applyMaximizedRect(entry, dispatch = true) {
         const rect = this.container.getBoundingClientRect();
         entry.x = 0;
         entry.y = 0;
@@ -869,12 +1288,78 @@ class AlopexApplicationHost {
         this.resizeEntry(
             entry,
             Math.max(entry.minContentCssWidth, Math.round(rect.width)),
-            Math.max(entry.minContentCssHeight, Math.round(rect.height - decoratedTitleBarHeight(entry))),
-            true);
+            Math.max(entry.minContentCssHeight, Math.round(rect.height - decoratedChromeHeight(entry))),
+            dispatch);
     }
 
     dispatchResize(entry) {
         this.dispatchWindowEvent(entry, { kind: "surface-resized" });
+    }
+
+    syncSurfaceSize(entry) {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = entry.canvas.getBoundingClientRect();
+        const cssWidth = rect.width > 0 ? rect.width : entry.contentCssWidth;
+        const cssHeight = rect.height > 0 ? rect.height : entry.contentCssHeight;
+        const width = Math.max(1, Math.round(cssWidth * dpr));
+        const height = Math.max(1, Math.round(cssHeight * dpr));
+        const changed = width !== entry.width || height !== entry.height || dpr !== entry.dpr ||
+            entry.canvas.width !== width || entry.canvas.height !== height;
+
+        entry.dpr = dpr;
+        entry.width = width;
+        entry.height = height;
+        if (entry.canvas.width !== width) {
+            entry.canvas.width = width;
+        }
+        if (entry.canvas.height !== height) {
+            entry.canvas.height = height;
+        }
+
+        return changed;
+    }
+
+    observeSurface(entry) {
+        if (typeof ResizeObserver !== "function") return;
+
+        const windowId = entry.id.toString();
+        const observer = new ResizeObserver(() => {
+            if (!this.windows.has(windowId)) return;
+            if (this.syncSurfaceSize(entry)) {
+                this.dispatchResize(entry);
+                this.requestRedraw(entry.id);
+            }
+        });
+        observer.observe(entry.canvas);
+        this.disposers.push(() => observer.disconnect());
+    }
+
+    watchDevicePixelRatio(callback) {
+        if (typeof window.matchMedia !== "function") return;
+
+        let disposeCurrent = null;
+        const arm = () => {
+            disposeCurrent?.();
+            const dpr = window.devicePixelRatio || 1;
+            const query = window.matchMedia(`(resolution: ${dpr}dppx)`);
+            const changed = () => {
+                callback();
+                arm();
+            };
+
+            if (query.addEventListener) {
+                query.addEventListener("change", changed);
+                disposeCurrent = () => query.removeEventListener("change", changed);
+            } else if (query.addListener) {
+                query.addListener(changed);
+                disposeCurrent = () => query.removeListener(changed);
+            } else {
+                disposeCurrent = null;
+            }
+        };
+
+        arm();
+        this.disposers.push(() => disposeCurrent?.());
     }
 
     dispatchStateChanged(entry) {
@@ -903,6 +1388,17 @@ class AlopexApplicationHost {
         }
     }
 
+    async dispatchProxyWakeUp() {
+        const dispatcher = this.eventTarget ?? this.getEventDispatcher?.();
+        if (!dispatcher) return;
+
+        if (dispatcher.invokeMethodAsync) {
+            await dispatcher.invokeMethodAsync("DispatchProxyWakeUpAsync");
+        } else if (dispatcher.DispatchProxyWakeUpAsync) {
+            await dispatcher.DispatchProxyWakeUpAsync();
+        }
+    }
+
     async dispatchWindowEvent(entry, event) {
         if (!this.started) return;
 
@@ -919,11 +1415,14 @@ class AlopexApplicationHost {
             y: event.y ?? event.frameY ?? entry.y ?? 0,
             pointerId: event.pointerId ?? -1,
             pointerType: event.pointerType ?? "",
+            pointerKind: event.pointerKind ?? pointerKindValue(event.pointerType),
             isPrimary: event.isPrimary ?? true,
             button: event.button ?? "",
             state: event.state ?? "",
             wheelX: event.wheelX ?? 0,
             wheelY: event.wheelY ?? 0,
+            gestureDelta: event.gestureDelta ?? 0,
+            gesturePhase: event.gesturePhase ?? 1,
             key: event.key ?? "",
             code: event.code ?? "",
             text: event.text ?? "",
@@ -944,12 +1443,147 @@ class AlopexApplicationHost {
             imeDeleteAfterBytes: event.imeDeleteAfterBytes ?? 0,
         };
 
+        if (await this.dispatchTypedWindowEvent(dispatcher, payload)) {
+            return;
+        }
+
         if (dispatcher.invokeMethodAsync) {
             await dispatcher.invokeMethodAsync("DispatchWindowEventJsonAsync", JSON.stringify(payload));
         } else if (dispatcher.DispatchWindowEventAsync) {
             await dispatcher.DispatchWindowEventAsync(JSON.stringify(payload));
         }
     }
+
+    async dispatchTypedWindowEvent(dispatcher, payload) {
+        const kind = windowEventKind(payload.kind);
+        if (dispatcher.invokeMethodAsync) {
+            return false;
+        }
+
+        // The direct JSExport path avoids JSON and uses only primitives that marshal cleanly
+        // in WASM. The JSON path remains as a compatibility fallback for Blazor interop.
+        const windowId = Number(payload.windowId);
+        const width = payload.width | 0;
+        const height = payload.height | 0;
+        const scaleFactor = Number(payload.scaleFactor) || 1;
+        const x = Number(payload.x) || 0;
+        const y = Number(payload.y) || 0;
+        const invoke = dispatcher.invokeMethodAsync
+            ? (method, ...args) => dispatcher.invokeMethodAsync(method, ...args)
+            : dispatcher.DispatchBasicWindowEventAsync ? (method, ...args) => dispatcher[method](...args) : null;
+
+        if (!invoke || kind < 0) {
+            return false;
+        }
+
+        switch (kind) {
+            case 0:
+            case 1:
+            case 2:
+            case 4:
+            case 5:
+                await invoke("DispatchBasicWindowEventAsync", kind, windowId, width, height, scaleFactor, x, y);
+                return true;
+            case 9:
+            case 10:
+            case 11:
+            case 12:
+                await invoke(
+                    "DispatchPointerEventAsync",
+                    kind,
+                    windowId,
+                    width,
+                    height,
+                    scaleFactor,
+                    x,
+                    y,
+                    Number(payload.pointerId ?? -1),
+                    payload.pointerKind ?? pointerKindValue(payload.pointerType),
+                    Boolean(payload.isPrimary),
+                    mouseButtonValue(payload.button),
+                    elementStateValue(payload.state),
+                    payload.modifiers | 0);
+                return true;
+            case 13:
+                await invoke("DispatchWheelEventAsync", windowId, width, height, scaleFactor, x, y, Number(payload.wheelX) || 0, Number(payload.wheelY) || 0, payload.modifiers | 0);
+                return true;
+            case 26:
+                await invoke("DispatchPinchGestureEventAsync", windowId, width, height, scaleFactor, x, y, Number(payload.gestureDelta) || 0, payload.gesturePhase | 0, payload.modifiers | 0);
+                return true;
+            case 14:
+                await invoke(
+                    "DispatchKeyboardEventAsync",
+                    windowId,
+                    width,
+                    height,
+                    scaleFactor,
+                    String(payload.key ?? ""),
+                    String(payload.code ?? ""),
+                    String(payload.text ?? ""),
+                    Boolean(payload.repeat),
+                    elementStateValue(payload.state),
+                    keyLocationValue(payload.location),
+                    payload.modifiers | 0);
+                return true;
+            case 20:
+                await invoke(
+                    "DispatchWindowStateChangedAsync",
+                    windowId,
+                    width,
+                    height,
+                    scaleFactor,
+                    x,
+                    y,
+                    Boolean(payload.resizable),
+                    Boolean(payload.maximized),
+                    Boolean(payload.minimized),
+                    Boolean(payload.visible),
+                    Boolean(payload.decorated),
+                    windowLevel(payload.windowLevel),
+                    Number(payload.enabledButtons ?? 7) | 0);
+                return true;
+            case 21:
+            case 22:
+            case 23:
+            case 24:
+            case 25:
+                await invoke(
+                    "DispatchImeEventAsync",
+                    kind,
+                    windowId,
+                    width,
+                    height,
+                    scaleFactor,
+                    String(payload.imeText ?? ""),
+                    payload.imeCursorStartByte | 0,
+                    payload.imeCursorEndByte | 0,
+                    payload.imeDeleteBeforeBytes | 0,
+                    payload.imeDeleteAfterBytes | 0);
+                return true;
+            default:
+                return false;
+        }
+    }
+}
+
+function trySetPointerCapture(element, pointerId) {
+    if (pointerId === undefined || typeof element.setPointerCapture !== "function") return;
+    try {
+        element.setPointerCapture(pointerId);
+    } catch {
+    }
+}
+
+function tryReleasePointerCapture(element, pointerId) {
+    if (pointerId === undefined || typeof element.releasePointerCapture !== "function") return;
+    try {
+        element.releasePointerCapture(pointerId);
+    } catch {
+    }
+}
+
+function pointerMoveKey(entry, pointerId) {
+    return `${entry.id}:${pointerId ?? -1}`;
 }
 
 function resolveHostElement(elementId) {
@@ -994,6 +1628,25 @@ function findDotnetRuntime() {
     return null;
 }
 
+function cssEscape(value) {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+        return CSS.escape(value);
+    }
+
+    return String(value).replace(/["\\]/g, "\\$&");
+}
+
+function removeWindowFramesById(windowId) {
+    const selector = `[data-alopex-window-id="${cssEscape(windowId)}"]`;
+    let removed = 0;
+    for (const frame of document.querySelectorAll(selector)) {
+        frame.remove();
+        removed++;
+    }
+
+    return removed;
+}
+
 function parseOptions(options) {
     if (typeof options === "string") {
         return JSON.parse(options);
@@ -1002,12 +1655,28 @@ function parseOptions(options) {
     return options ?? {};
 }
 
+function parseMenu(menu) {
+    const value = typeof menu === "string" ? JSON.parse(menu || "{\"items\":[]}") : menu;
+    return {
+        items: Array.isArray(value?.items) ? value.items : [],
+    };
+}
+
 function normalizeSize(value, name) {
     const size = Number(value);
     if (!Number.isFinite(size) || size <= 0) {
         throw new Error(`Window ${name} must be a positive number.`);
     }
     return Math.floor(size);
+}
+
+function normalizeOwnerWindowId(value) {
+    if (value === null || value === undefined || value === "") {
+        return null;
+    }
+
+    const text = String(value);
+    return text === "0" ? null : text;
 }
 
 function pointerButton(button) {
@@ -1027,6 +1696,71 @@ function keyLocation(location) {
         case 2: return "right";
         case 3: return "numpad";
         default: return "standard";
+    }
+}
+
+function elementStateValue(state) {
+    return state === "released" ? 1 : 0;
+}
+
+function pointerKindValue(type) {
+    switch (type) {
+        case "mouse": return 0;
+        case "touch": return 1;
+        case "pen": return 2;
+        default: return 3;
+    }
+}
+
+function mouseButtonValue(button) {
+    switch (button) {
+        case "left": return 0;
+        case "right": return 1;
+        case "middle": return 2;
+        case "back": return 3;
+        case "forward": return 4;
+        default: return 255;
+    }
+}
+
+function keyLocationValue(location) {
+    switch (location) {
+        case "left": return 1;
+        case "right": return 2;
+        case "numpad": return 3;
+        default: return 0;
+    }
+}
+
+function windowEventKind(kind) {
+    switch (kind) {
+        case "surface-resized": return 0;
+        case "close-requested": return 1;
+        case "destroyed": return 2;
+        case "redraw-requested": return 4;
+        case "moved": return 5;
+        case "pointer-entered": return 9;
+        case "pointer-left": return 10;
+        case "pointer-moved": return 11;
+        case "pointer-button": return 12;
+        case "mouse-wheel": return 13;
+        case "keyboard-input": return 14;
+        case "window-state-changed": return 20;
+        case "ime-enabled": return 21;
+        case "ime-preedit": return 22;
+        case "ime-commit": return 23;
+        case "ime-delete-surrounding": return 24;
+        case "ime-disabled": return 25;
+        case "pinch-gesture": return 26;
+        default: return -1;
+    }
+}
+
+function windowLevel(level) {
+    switch (level) {
+        case "AlwaysOnBottom": return 0;
+        case "AlwaysOnTop": return 2;
+        default: return 1;
     }
 }
 
@@ -1061,6 +1795,21 @@ function shouldPreventBrowserKeyboardDefault(event) {
         default:
             return false;
     }
+}
+
+function getPreferredLanguage() {
+    const htmlLanguage = document?.documentElement?.lang;
+    if (typeof htmlLanguage === "string" && htmlLanguage.trim()) {
+        return htmlLanguage.trim();
+    }
+
+    const navigatorLanguage = navigator?.language;
+    if (typeof navigatorLanguage === "string" && navigatorLanguage.trim()) {
+        return navigatorLanguage.trim();
+    }
+
+    const firstNavigatorLanguage = Array.isArray(navigator?.languages) ? navigator.languages[0] : null;
+    return typeof firstNavigatorLanguage === "string" ? firstNavigatorLanguage : "";
 }
 
 async function readClipboardText() {
@@ -1113,9 +1862,27 @@ function collapsedTitleBarHeight() {
     return 4;
 }
 
+function hasMenuBar(entry) {
+    return entry.menuBar && Array.isArray(entry.menuBar.items) && entry.menuBar.items.length > 0;
+}
+
 function decoratedTitleBarHeight(entry) {
     if (!entry.decorated) return 0;
-    return entry.maximized ? collapsedTitleBarHeight() : titleBarHeight();
+    return entry.maximized && !hasMenuBar(entry) ? collapsedTitleBarHeight() : titleBarHeight();
+}
+
+function decoratedChromeHeight(entry) {
+    return decoratedTitleBarHeight(entry);
+}
+
+function applyWindowLayout(entry) {
+    const titleHeight = decoratedTitleBarHeight(entry);
+    const rows = [];
+    if (titleHeight > 0) rows.push(`${titleHeight}px`);
+    rows.push("1fr");
+    entry.frame.style.gridTemplateRows = rows.join(" ");
+    entry.frame.style.height = `${entry.contentCssHeight + titleHeight}px`;
+    entry.menubar.style.display = hasMenuBar(entry) ? "" : "none";
 }
 
 function canvasPoint(entry, event) {
@@ -1126,6 +1893,49 @@ function canvasPoint(entry, event) {
         x: (event.clientX - rect.left) * scaleX,
         y: (event.clientY - rect.top) * scaleY,
     };
+}
+
+function surfaceToWindowCssPoint(entry, x, y) {
+    const point = surfaceToContentCssPoint(entry, x, y);
+    return {
+        x: point.x,
+        y: Math.round(decoratedChromeHeight(entry) + point.y),
+    };
+}
+
+function surfaceToContentCssPoint(entry, x, y) {
+    const rect = entry.canvas.getBoundingClientRect();
+    const cssWidth = rect.width > 0 ? rect.width : entry.contentCssWidth;
+    const cssHeight = rect.height > 0 ? rect.height : entry.contentCssHeight;
+    const scaleX = entry.width > 0 ? cssWidth / entry.width : 1 / entry.dpr;
+    const scaleY = entry.height > 0 ? cssHeight / entry.height : 1 / entry.dpr;
+    return {
+        x: Math.round((Number(x) || 0) * scaleX),
+        y: Math.round((Number(y) || 0) * scaleY),
+    };
+}
+
+function surfaceToWindowCssSize(entry, width, height) {
+    const rect = entry.canvas.getBoundingClientRect();
+    const cssWidth = rect.width > 0 ? rect.width : entry.contentCssWidth;
+    const cssHeight = rect.height > 0 ? rect.height : entry.contentCssHeight;
+    const scaleX = entry.width > 0 ? cssWidth / entry.width : 1 / entry.dpr;
+    const scaleY = entry.height > 0 ? cssHeight / entry.height : 1 / entry.dpr;
+    return {
+        width: Math.round((Number(width) || 0) * scaleX),
+        height: Math.round((Number(height) || 0) * scaleY),
+    };
+}
+
+function clampPopupToFrame(entry, popup) {
+    const frameRect = entry.frame.getBoundingClientRect();
+    const popupRect = popup.getBoundingClientRect();
+    const currentLeft = parseFloat(popup.style.left) || 0;
+    const currentTop = parseFloat(popup.style.top) || 0;
+    const maxLeft = Math.max(0, frameRect.width - popupRect.width - 4);
+    const maxTop = Math.max(0, frameRect.height - popupRect.height - 4);
+    popup.style.left = `${Math.min(currentLeft, maxLeft)}px`;
+    popup.style.top = `${Math.min(currentTop, maxTop)}px`;
 }
 
 function ensureWindowStyles() {
@@ -1159,7 +1969,6 @@ function ensureWindowStyles() {
     box-sizing: border-box;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
     height: ${titleBarHeight()}px;
     padding: 0 6px 0 10px;
@@ -1173,6 +1982,7 @@ function ensureWindowStyles() {
     transition: height 140ms ease, opacity 120ms ease, transform 140ms ease, background-color 140ms ease;
     z-index: 2;
 }
+.alopex-web-window-has-menu.alopex-web-window-maximized .alopex-web-window-titlebar,
 .alopex-web-window-maximized .alopex-web-window-titlebar {
     height: ${collapsedTitleBarHeight()}px;
     padding: 0;
@@ -1182,7 +1992,15 @@ function ensureWindowStyles() {
     border-bottom: 0;
     cursor: default;
 }
-.alopex-web-window-maximized .alopex-web-window-titlebar:hover {
+.alopex-web-window-has-menu.alopex-web-window-maximized .alopex-web-window-titlebar {
+    height: ${titleBarHeight()}px;
+    padding: 0 6px 0 10px;
+    overflow: visible;
+    opacity: 1;
+    background: #20253a;
+    border-bottom: 1px solid #30364d;
+}
+.alopex-web-window-maximized.alopex-web-window-titlebar-expanded .alopex-web-window-titlebar {
     height: ${titleBarHeight()}px;
     padding: 0 6px 0 10px;
     overflow: visible;
@@ -1191,18 +2009,126 @@ function ensureWindowStyles() {
     border-bottom: 1px solid #30364d;
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
     cursor: default;
+    z-index: 5;
 }
-.alopex-web-window-maximized .alopex-web-window-titlebar:not(:hover) .alopex-web-window-title,
-.alopex-web-window-maximized .alopex-web-window-titlebar:not(:hover) .alopex-web-window-buttons {
+.alopex-web-window-maximized:not(.alopex-web-window-titlebar-expanded) .alopex-web-window-title,
+.alopex-web-window-maximized:not(.alopex-web-window-titlebar-expanded) .alopex-web-window-buttons {
     opacity: 0;
     pointer-events: none;
 }
+.alopex-web-window-has-menu.alopex-web-window-maximized:not(.alopex-web-window-titlebar-expanded) .alopex-web-window-title {
+    opacity: 1;
+    pointer-events: auto;
+}
+.alopex-web-window-has-menu.alopex-web-window-maximized:not(.alopex-web-window-titlebar-expanded) .alopex-web-window-buttons {
+    opacity: 0;
+    pointer-events: none;
+}
+.alopex-web-window-has-menu.alopex-web-window-maximized.alopex-web-window-titlebar-expanded .alopex-web-window-buttons {
+    opacity: 1;
+    pointer-events: auto;
+}
 .alopex-web-window-title {
-    min-width: 0;
+    flex: 0 1 auto;
+    min-width: 80px;
+    max-width: 34%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     transition: opacity 100ms ease;
+}
+.alopex-web-window-menubar {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    padding: 1px 0;
+    color: inherit;
+    background: transparent;
+    border-bottom: 0;
+    font: 12px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    user-select: none;
+    z-index: 2;
+}
+.alopex-web-menu-root {
+    box-sizing: border-box;
+    height: 22px;
+    min-width: 44px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    text-align: center;
+}
+.alopex-web-menu-root:hover,
+.alopex-web-menu-root:focus-visible {
+    background: #28304a;
+    border-color: #435078;
+    outline: none;
+}
+.alopex-web-menu-root:disabled {
+    opacity: 0.42;
+}
+.alopex-web-menu-popup {
+    position: absolute;
+    box-sizing: border-box;
+    z-index: 20;
+    min-width: 176px;
+    max-width: 280px;
+    padding: 5px;
+    color: #edf2ff;
+    background: #1b2032;
+    border: 1px solid #3a4568;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.36);
+    font: 12px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.alopex-web-context-menu {
+    z-index: 25;
+}
+.alopex-web-menu-item {
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 26px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 4px;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+}
+.alopex-web-menu-item:hover,
+.alopex-web-menu-item:focus-visible {
+    background: #2b3656;
+    outline: none;
+}
+.alopex-web-menu-item:disabled {
+    opacity: 0.42;
+}
+.alopex-web-menu-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.alopex-web-menu-shortcut,
+.alopex-web-menu-arrow {
+    color: #aeb9dc;
+    white-space: nowrap;
+}
+.alopex-web-menu-separator {
+    height: 1px;
+    margin: 5px 4px;
+    background: #313a59;
 }
 .alopex-web-window-buttons {
     display: flex;

@@ -18,10 +18,11 @@ export class VelloWebRenderer {
         wasm.__wbg_vellowebrenderer_free(ptr, 0);
     }
     /**
-     * @param {bigint} element_id
+     * @param {number} element_id_high
+     * @param {number} element_id_low
      */
-    direct_begin_element(element_id) {
-        const ret = wasm.vellowebrenderer_direct_begin_element(this.__wbg_ptr, element_id);
+    direct_begin_element(element_id_high, element_id_low) {
+        const ret = wasm.vellowebrenderer_direct_begin_element(this.__wbg_ptr, element_id_high, element_id_low);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -30,10 +31,26 @@ export class VelloWebRenderer {
         wasm.vellowebrenderer_direct_begin_frame(this.__wbg_ptr);
     }
     /**
-     * @param {bigint} frame_id
+     * @param {number} frame_id_high
+     * @param {number} frame_id_low
      */
-    direct_begin_frame_graph(frame_id) {
-        const ret = wasm.vellowebrenderer_direct_begin_frame_graph(this.__wbg_ptr, frame_id);
+    direct_begin_frame_graph(frame_id_high, frame_id_low) {
+        const ret = wasm.vellowebrenderer_direct_begin_frame_graph(this.__wbg_ptr, frame_id_high, frame_id_low);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} transition_id_high
+     * @param {number} transition_id_low
+     * @param {number} duration_ms
+     * @param {number} from_width
+     * @param {number} from_height
+     * @param {number} to_width
+     * @param {number} to_height
+     */
+    direct_begin_transition_scope(transition_id_high, transition_id_low, duration_ms, from_width, from_height, to_width, to_height) {
+        const ret = wasm.vellowebrenderer_direct_begin_transition_scope(this.__wbg_ptr, transition_id_high, transition_id_low, duration_ms, from_width, from_height, to_width, to_height);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -44,6 +61,27 @@ export class VelloWebRenderer {
     direct_create_path() {
         const ret = wasm.vellowebrenderer_direct_create_path(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number} width
+     * @param {number} height
+     * @param {number} corner_radius
+     * @param {number} blur_radius
+     * @param {number} r
+     * @param {number} g
+     * @param {number} b
+     * @param {number} a
+     * @param {number} m11
+     * @param {number} m12
+     * @param {number} m21
+     * @param {number} m22
+     * @param {number} m31
+     * @param {number} m32
+     */
+    direct_draw_blurred_rounded_rect(x, y, width, height, corner_radius, blur_radius, r, g, b, a, m11, m12, m21, m22, m31, m32) {
+        wasm.vellowebrenderer_direct_draw_blurred_rounded_rect(this.__wbg_ptr, x, y, width, height, corner_radius, blur_radius, r, g, b, a, m11, m12, m21, m22, m31, m32);
     }
     /**
      * @param {number} cx
@@ -71,7 +109,8 @@ export class VelloWebRenderer {
         }
     }
     /**
-     * @param {bigint} element_id
+     * @param {number} element_id_high
+     * @param {number} element_id_low
      * @param {number} m11
      * @param {number} m12
      * @param {number} m21
@@ -79,14 +118,15 @@ export class VelloWebRenderer {
      * @param {number} m31
      * @param {number} m32
      */
-    direct_draw_element(element_id, m11, m12, m21, m22, m31, m32) {
-        const ret = wasm.vellowebrenderer_direct_draw_element(this.__wbg_ptr, element_id, m11, m12, m21, m22, m31, m32);
+    direct_draw_element(element_id_high, element_id_low, m11, m12, m21, m22, m31, m32) {
+        const ret = wasm.vellowebrenderer_direct_draw_element(this.__wbg_ptr, element_id_high, element_id_low, m11, m12, m21, m22, m31, m32);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
     }
     /**
-     * @param {bigint} frame_id
+     * @param {number} frame_id_high
+     * @param {number} frame_id_low
      * @param {number} m11
      * @param {number} m12
      * @param {number} m21
@@ -94,8 +134,8 @@ export class VelloWebRenderer {
      * @param {number} m31
      * @param {number} m32
      */
-    direct_draw_frame_graph(frame_id, m11, m12, m21, m22, m31, m32) {
-        const ret = wasm.vellowebrenderer_direct_draw_frame_graph(this.__wbg_ptr, frame_id, m11, m12, m21, m22, m31, m32);
+    direct_draw_frame_graph(frame_id_high, frame_id_low, m11, m12, m21, m22, m31, m32) {
+        const ret = wasm.vellowebrenderer_direct_draw_frame_graph(this.__wbg_ptr, frame_id_high, frame_id_low, m11, m12, m21, m22, m31, m32);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -259,7 +299,8 @@ export class VelloWebRenderer {
      * @param {number} spread
      * @param {Uint8Array} stop_offsets
      * @param {Uint8Array} stop_colors
-     * @param {bigint} image_id
+     * @param {number} image_id_high
+     * @param {number} image_id_low
      * @param {number} tile_mode
      * @param {number} stretch
      * @param {number} align_x
@@ -276,12 +317,32 @@ export class VelloWebRenderer {
      * @param {number} m31
      * @param {number} m32
      */
-    direct_draw_shape_with_brush(shape, x0, y0, x1, y1, r0, r1, r2, r3, style, stroke_width, stroke_cap, stroke_join, brush_kind, r, g, b, a, p0x, p0y, p1x, p1y, radius, start_angle, end_angle, spread, stop_offsets, stop_colors, image_id, tile_mode, stretch, align_x, align_y, has_bounds, bounds_x, bounds_y, bounds_width, bounds_height, m11, m12, m21, m22, m31, m32) {
+    direct_draw_shape_with_brush(shape, x0, y0, x1, y1, r0, r1, r2, r3, style, stroke_width, stroke_cap, stroke_join, brush_kind, r, g, b, a, p0x, p0y, p1x, p1y, radius, start_angle, end_angle, spread, stop_offsets, stop_colors, image_id_high, image_id_low, tile_mode, stretch, align_x, align_y, has_bounds, bounds_x, bounds_y, bounds_width, bounds_height, m11, m12, m21, m22, m31, m32) {
         const ptr0 = passArray8ToWasm0(stop_offsets, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passArray8ToWasm0(stop_colors, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.vellowebrenderer_direct_draw_shape_with_brush(this.__wbg_ptr, shape, x0, y0, x1, y1, r0, r1, r2, r3, style, stroke_width, stroke_cap, stroke_join, brush_kind, r, g, b, a, p0x, p0y, p1x, p1y, radius, start_angle, end_angle, spread, ptr0, len0, ptr1, len1, image_id, tile_mode, stretch, align_x, align_y, has_bounds, bounds_x, bounds_y, bounds_width, bounds_height, m11, m12, m21, m22, m31, m32);
+        const ret = wasm.vellowebrenderer_direct_draw_shape_with_brush(this.__wbg_ptr, shape, x0, y0, x1, y1, r0, r1, r2, r3, style, stroke_width, stroke_cap, stroke_join, brush_kind, r, g, b, a, p0x, p0y, p1x, p1y, radius, start_angle, end_angle, spread, ptr0, len0, ptr1, len1, image_id_high, image_id_low, tile_mode, stretch, align_x, align_y, has_bounds, bounds_x, bounds_y, bounds_width, bounds_height, m11, m12, m21, m22, m31, m32);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} svg_id_high
+     * @param {number} svg_id_low
+     * @param {number} x
+     * @param {number} y
+     * @param {number} width
+     * @param {number} height
+     * @param {number} m11
+     * @param {number} m12
+     * @param {number} m21
+     * @param {number} m22
+     * @param {number} m31
+     * @param {number} m32
+     */
+    direct_draw_svg(svg_id_high, svg_id_low, x, y, width, height, m11, m12, m21, m22, m31, m32) {
+        const ret = wasm.vellowebrenderer_direct_draw_svg(this.__wbg_ptr, svg_id_high, svg_id_low, x, y, width, height, m11, m12, m21, m22, m31, m32);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -292,6 +353,7 @@ export class VelloWebRenderer {
      * @param {number} y
      * @param {number} align
      * @param {string} family_name
+     * @param {number} weight
      * @param {number} size
      * @param {number} r
      * @param {number} g
@@ -304,12 +366,12 @@ export class VelloWebRenderer {
      * @param {number} m31
      * @param {number} m32
      */
-    direct_draw_text(text, x, y, align, family_name, size, r, g, b, a, m11, m12, m21, m22, m31, m32) {
+    direct_draw_text(text, x, y, align, family_name, weight, size, r, g, b, a, m11, m12, m21, m22, m31, m32) {
         const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(family_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.vellowebrenderer_direct_draw_text(this.__wbg_ptr, ptr0, len0, x, y, align, ptr1, len1, size, r, g, b, a, m11, m12, m21, m22, m31, m32);
+        const ret = wasm.vellowebrenderer_direct_draw_text(this.__wbg_ptr, ptr0, len0, x, y, align, ptr1, len1, weight, size, r, g, b, a, m11, m12, m21, m22, m31, m32);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -320,6 +382,7 @@ export class VelloWebRenderer {
      * @param {number} y
      * @param {number} align
      * @param {string} family_name
+     * @param {number} weight
      * @param {number} size
      * @param {number} brush_kind
      * @param {number} r
@@ -336,7 +399,8 @@ export class VelloWebRenderer {
      * @param {number} spread
      * @param {Uint8Array} stop_offsets
      * @param {Uint8Array} stop_colors
-     * @param {bigint} image_id
+     * @param {number} image_id_high
+     * @param {number} image_id_low
      * @param {number} tile_mode
      * @param {number} stretch
      * @param {number} align_x
@@ -353,7 +417,7 @@ export class VelloWebRenderer {
      * @param {number} m31
      * @param {number} m32
      */
-    direct_draw_text_with_brush(text, x, y, align, family_name, size, brush_kind, r, g, b, a, p0x, p0y, p1x, p1y, radius, start_angle, end_angle, spread, stop_offsets, stop_colors, image_id, tile_mode, stretch, align_x, align_y, has_bounds, bounds_x, bounds_y, bounds_width, bounds_height, m11, m12, m21, m22, m31, m32) {
+    direct_draw_text_with_brush(text, x, y, align, family_name, weight, size, brush_kind, r, g, b, a, p0x, p0y, p1x, p1y, radius, start_angle, end_angle, spread, stop_offsets, stop_colors, image_id_high, image_id_low, tile_mode, stretch, align_x, align_y, has_bounds, bounds_x, bounds_y, bounds_width, bounds_height, m11, m12, m21, m22, m31, m32) {
         const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(family_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
@@ -362,22 +426,24 @@ export class VelloWebRenderer {
         const len2 = WASM_VECTOR_LEN;
         const ptr3 = passArray8ToWasm0(stop_colors, wasm.__wbindgen_malloc);
         const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.vellowebrenderer_direct_draw_text_with_brush(this.__wbg_ptr, ptr0, len0, x, y, align, ptr1, len1, size, brush_kind, r, g, b, a, p0x, p0y, p1x, p1y, radius, start_angle, end_angle, spread, ptr2, len2, ptr3, len3, image_id, tile_mode, stretch, align_x, align_y, has_bounds, bounds_x, bounds_y, bounds_width, bounds_height, m11, m12, m21, m22, m31, m32);
+        const ret = wasm.vellowebrenderer_direct_draw_text_with_brush(this.__wbg_ptr, ptr0, len0, x, y, align, ptr1, len1, weight, size, brush_kind, r, g, b, a, p0x, p0y, p1x, p1y, radius, start_angle, end_angle, spread, ptr2, len2, ptr3, len3, image_id_high, image_id_low, tile_mode, stretch, align_x, align_y, has_bounds, bounds_x, bounds_y, bounds_width, bounds_height, m11, m12, m21, m22, m31, m32);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
     }
     /**
-     * @param {bigint} element_id
+     * @param {number} element_id_high
+     * @param {number} element_id_low
      */
-    direct_drop_element(element_id) {
-        wasm.vellowebrenderer_direct_drop_element(this.__wbg_ptr, element_id);
+    direct_drop_element(element_id_high, element_id_low) {
+        wasm.vellowebrenderer_direct_drop_element(this.__wbg_ptr, element_id_high, element_id_low);
     }
     /**
-     * @param {bigint} frame_id
+     * @param {number} frame_id_high
+     * @param {number} frame_id_low
      */
-    direct_drop_frame_graph(frame_id) {
-        wasm.vellowebrenderer_direct_drop_frame_graph(this.__wbg_ptr, frame_id);
+    direct_drop_frame_graph(frame_id_high, frame_id_low) {
+        wasm.vellowebrenderer_direct_drop_frame_graph(this.__wbg_ptr, frame_id_high, frame_id_low);
     }
     /**
      * @param {number} path_id
@@ -396,6 +462,16 @@ export class VelloWebRenderer {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    direct_end_transition_scope() {
+        wasm.vellowebrenderer_direct_end_transition_scope(this.__wbg_ptr);
+    }
+    /**
+     * @returns {boolean}
+     */
+    direct_has_active_transitions() {
+        const ret = wasm.vellowebrenderer_direct_has_active_transitions(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * @param {number} path_id
@@ -473,6 +549,12 @@ export class VelloWebRenderer {
     direct_pop_layer() {
         wasm.vellowebrenderer_direct_pop_layer(this.__wbg_ptr);
     }
+    direct_pop_retained_clip() {
+        const ret = wasm.vellowebrenderer_direct_pop_retained_clip(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
     /**
      * @param {number} path_id
      * @param {number} m11
@@ -504,6 +586,39 @@ export class VelloWebRenderer {
         wasm.vellowebrenderer_direct_push_clip_rect(this.__wbg_ptr, x, y, width, height, m11, m12, m21, m22, m31, m32);
     }
     /**
+     * @param {number} path_id
+     * @param {number} m11
+     * @param {number} m12
+     * @param {number} m21
+     * @param {number} m22
+     * @param {number} m31
+     * @param {number} m32
+     */
+    direct_push_retained_clip_path(path_id, m11, m12, m21, m22, m31, m32) {
+        const ret = wasm.vellowebrenderer_direct_push_retained_clip_path(this.__wbg_ptr, path_id, m11, m12, m21, m22, m31, m32);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number} width
+     * @param {number} height
+     * @param {number} m11
+     * @param {number} m12
+     * @param {number} m21
+     * @param {number} m22
+     * @param {number} m31
+     * @param {number} m32
+     */
+    direct_push_retained_clip_rect(x, y, width, height, m11, m12, m21, m22, m31, m32) {
+        const ret = wasm.vellowebrenderer_direct_push_retained_clip_rect(this.__wbg_ptr, x, y, width, height, m11, m12, m21, m22, m31, m32);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @param {number} background_r
      * @param {number} background_g
      * @param {number} background_b
@@ -521,15 +636,16 @@ export class VelloWebRenderer {
     /**
      * @param {string} family_name
      * @param {string} text
+     * @param {number} weight
      * @param {number} size
      * @returns {number}
      */
-    measure_text(family_name, text, size) {
+    measure_text(family_name, text, weight, size) {
         const ptr0 = passStringToWasm0(family_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.vellowebrenderer_measure_text(this.__wbg_ptr, ptr0, len0, ptr1, len1, size);
+        const ret = wasm.vellowebrenderer_measure_text(this.__wbg_ptr, ptr0, len0, ptr1, len1, weight, size);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -538,25 +654,40 @@ export class VelloWebRenderer {
     /**
      * @param {string} family_name
      * @param {Uint8Array} font_bytes
+     * @param {number} weight
      */
-    register_font(family_name, font_bytes) {
+    register_font(family_name, font_bytes, weight) {
         const ptr0 = passStringToWasm0(family_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passArray8ToWasm0(font_bytes, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.vellowebrenderer_register_font(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        const ret = wasm.vellowebrenderer_register_font(this.__wbg_ptr, ptr0, len0, ptr1, len1, weight);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
     }
     /**
-     * @param {bigint} image_id
+     * @param {number} image_id_high
+     * @param {number} image_id_low
      * @param {Uint8Array} image_bytes
      */
-    register_image(image_id, image_bytes) {
+    register_image(image_id_high, image_id_low, image_bytes) {
         const ptr0 = passArray8ToWasm0(image_bytes, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.vellowebrenderer_register_image(this.__wbg_ptr, image_id, ptr0, len0);
+        const ret = wasm.vellowebrenderer_register_image(this.__wbg_ptr, image_id_high, image_id_low, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} svg_id_high
+     * @param {number} svg_id_low
+     * @param {Uint8Array} svg_bytes
+     */
+    register_svg(svg_id_high, svg_id_low, svg_bytes) {
+        const ptr0 = passArray8ToWasm0(svg_bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.vellowebrenderer_register_svg(this.__wbg_ptr, svg_id_high, svg_id_low, ptr0, len0);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -577,10 +708,11 @@ if (Symbol.dispose) VelloWebRenderer.prototype[Symbol.dispose] = VelloWebRendere
  * @param {HTMLCanvasElement} canvas
  * @param {number} width
  * @param {number} height
+ * @param {number} antialiasing
  * @returns {Promise<VelloWebRenderer>}
  */
-export function create_renderer(canvas, width, height) {
-    const ret = wasm.create_renderer(canvas, width, height);
+export function create_renderer(canvas, width, height, antialiasing) {
+    const ret = wasm.create_renderer(canvas, width, height, antialiasing);
     return ret;
 }
 function __wbg_get_imports() {
@@ -839,7 +971,7 @@ function __wbg_get_imports() {
                     const a = state0.a;
                     state0.a = 0;
                     try {
-                        return wasm_bindgen__convert__closures_____invoke__h20eab749ca0d0887(a, state0.b, arg0, arg1);
+                        return wasm_bindgen__convert__closures_____invoke__h4025f2a0c3a33b96(a, state0.b, arg0, arg1);
                     } finally {
                         state0.a = a;
                     }
@@ -849,6 +981,10 @@ function __wbg_get_imports() {
             } finally {
                 state0.a = 0;
             }
+        },
+        __wbg_now_190933fa139cc119: function() {
+            const ret = Date.now();
+            return ret;
         },
         __wbg_onSubmittedWorkDone_5f36409816d68e04: function(arg0) {
             const ret = arg0.onSubmittedWorkDone();
@@ -1478,13 +1614,13 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, getArrayU8FromWasm0(arg2, arg3), arg4, arg5);
         }, arguments); },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 342, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h1346193d6ab1d1d4);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 794, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h2d1d56c9716e8341);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 371, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h3a85595bf19719e3);
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 823, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__hbc3d4524cd8af417);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0) {
@@ -1513,19 +1649,19 @@ function __wbg_get_imports() {
     };
 }
 
-function wasm_bindgen__convert__closures_____invoke__h1346193d6ab1d1d4(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h1346193d6ab1d1d4(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h2d1d56c9716e8341(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h2d1d56c9716e8341(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h3a85595bf19719e3(arg0, arg1, arg2) {
-    const ret = wasm.wasm_bindgen__convert__closures_____invoke__h3a85595bf19719e3(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__hbc3d4524cd8af417(arg0, arg1, arg2) {
+    const ret = wasm.wasm_bindgen__convert__closures_____invoke__hbc3d4524cd8af417(arg0, arg1, arg2);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
 }
 
-function wasm_bindgen__convert__closures_____invoke__h20eab749ca0d0887(arg0, arg1, arg2, arg3) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h20eab749ca0d0887(arg0, arg1, arg2, arg3);
+function wasm_bindgen__convert__closures_____invoke__h4025f2a0c3a33b96(arg0, arg1, arg2, arg3) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h4025f2a0c3a33b96(arg0, arg1, arg2, arg3);
 }
 
 
